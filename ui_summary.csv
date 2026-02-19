@@ -1,0 +1,24 @@
+column,dtype,missing_pct,nunique,description,confidence,flags,severity,reasons
+Account Segment,object,0,2,Account segment or customer tier.,med,near_constant,1,nunique=2
+Close Date,datetime64[ns],0,1465,Closing or completion date for the record.,low,potential_leakage,3,name contains: close
+Close Year,int64,0,8,Year when the record was closed.,med,potential_leakage,3,name contains: close
+Contract Date Range,object,3.6,3120,Date or timestamp field.,low,high_cardinality,2,nunique=3120
+Contract End Date,datetime64[ns],0,1547,Contract or period end date.,low,,0,
+Contract Start Date,datetime64[ns],0,1557,Contract or period start date.,low,,0,
+Contract Term,float64,0,400,Contract term length (e.g. years or fraction).,low,,0,
+Customer Amount,int64,0,3386,Total monetary amount or sum.,low,extreme_outliers | potential_leakage,3,"count=1056, max_z=50.0; name contains: amount"
+Customer Total,int64,0,3520,Total monetary amount or sum.,low,extreme_outliers | potential_leakage,3,"count=863, max_z=72.2; name contains: total"
+Customer Unit Price,int64,0,1231,Per-unit price or list price for the item.,low,extreme_outliers,2,"count=406, max_z=626.3"
+Description,object,0.2,377,Free-text or structured description of the record.,low,high_cardinality,1,nunique=377
+Expiring ARR,float64,0,2025,Annual recurring revenue metric.,low,extreme_outliers | potential_leakage,3,"count=1023, max_z=48.7; name contains: arr"
+Growth ARR,int64,0,2838,Annual recurring revenue metric.,low,extreme_outliers | potential_leakage,3,"count=1207, max_z=93.3; name contains: arr"
+Opportunity : Account Name : Account ID,object,0,1502,Identifier or unique reference column (1502 unique values).,low,high_cardinality | suspicious_id_like,2,"nunique=1502; name suggests id, high cardinality 1502"
+Opportunity Owner,object,0,96,Sales or opportunity owner name.,med,,0,
+Opportunity Type,object,0,5,"Type of opportunity (e.g. new business, renewal).",med,,0,
+Product Family,object,0,2,Product family or category grouping.,med,near_constant,1,nunique=2
+Product Name,object,0,42,Name or title of the product.,med,,0,
+Quantity,int64,0,262,Quantity or count of units.,low,extreme_outliers,2,"count=1035, max_z=504.9"
+Quote ARR,int64,0,2670,Annual recurring revenue metric.,low,extreme_outliers | potential_leakage,3,"count=945, max_z=30.9; name contains: arr"
+Quote Line ARR,float64,0,2815,Annual recurring revenue metric.,low,extreme_outliers | potential_leakage,3,"count=898, max_z=56.5; name contains: arr"
+Quote Line ID,object,0,8668,Identifier or unique reference column (8668 unique values).,low,high_cardinality | suspicious_id_like,2,nunique=8668; nunique≈nrows (8668/8668)
+Quote Number,object,0,5442,Identifier or unique reference column (5442 unique values).,low,high_cardinality | suspicious_id_like,2,"nunique=5442; name suggests id, nunique=5442"

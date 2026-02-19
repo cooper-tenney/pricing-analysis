@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Config</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Model Config</h1>
+        <a href="/models" class="back">← Back to Model Settings</a>
+        <a href="/results" class="back" style="margin-left: 1rem;">View Results</a>
+        <a href="/" class="back" style="margin-left: 1rem;">Upload New Dataset</a>
+
+        {% if error %}
+        <div class="banner banner-error">{{ error }}</div>
+        {% endif %}
+        {% if config_meta and config_meta.saved_at %}
+        <div class="banner banner-saved">Config saved at {{ config_meta.saved_at[:19] if config_meta.saved_at else '' }}</div>
+        {% endif %}
+
+        <section class="card">
+            <h2>Current Config</h2>
+            <ul>
+                <li><strong>Model:</strong> {{ config.model_name }}</li>
+                <li><strong>Text mode:</strong> {{ config.text_mode }}</li>
+                <li><strong>TF-IDF:</strong> max_features={{ config.tfidf_max_features }}, ngram_max={{ config.tfidf_ngram_max }}</li>
+                <li><strong>CV folds:</strong> {{ config.cv_folds }}</li>
+                <li><strong>Optuna trials:</strong> {{ config.optuna_trials }}</li>
+                <li><strong>Best params:</strong> {% if config.best_params %}Yes (from optimization){% else %}None{% endif %}</li>
+            </ul>
+        </section>
+
+        <section class="card">
+            <h2>Save Config</h2>
+            <form action="/models/save" method="post" class="upload-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="model_name">Model</label>
+                        <select id="model_name" name="model_name">
+                            <option value="xgboost" {% if config.model_name == "xgboost" %}selected{% endif %}>XGBoost</option>
+                            <option value="random_forest" {% if config.model_name == "random_forest" %}selected{% endif %}>Random Forest</option>
+                            <option value="extra_trees" {% if config.model_name == "extra_trees" %}selected{% endif %}>Extra Trees</option>
+                            <option value="ridge" {% if config.model_name == "ridge" %}selected{% endif %}>Ridge</option>
+                            <option value="lasso" {% if config.model_name == "lasso" %}selected{% endif %}>Lasso</option>
+                            <option value="elastic_net" {% if config.model_name == "elastic_net" %}selected{% endif %}>ElasticNet</option>
+                            <option value="linear" {% if config.model_name == "linear" %}selected{% endif %}>Linear</option>
+                            <option value="svr" {% if config.model_name == "svr" %}selected{% endif %}>SVR</option>
+                            <option value="lgbm_optional" {% if config.model_name == "lgbm_optional" %}selected{% endif %}>LightGBM (optional)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="text_mode">Text mode</label>
+                        <select id="text_mode" name="text_mode">
+                            <option value="tfidf" {% if config.text_mode == "tfidf" %}selected{% endif %}>TF-IDF</option>
+                            <option value="none" {% if config.text_mode == "none" %}selected{% endif %}>None</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="tfidf_max_features">TF-IDF max features</label>
+                        <input type="number" id="tfidf_max_features" name="tfidf_max_features" value="{{ config.tfidf_max_features }}" min="100" max="50000" step="500">
+                    </div>
+                    <div class="form-group">
+                        <label for="tfidf_ngram_max">TF-IDF ngram max</label>
+                        <input type="number" id="tfidf_ngram_max" name="tfidf_ngram_max" value="{{ config.tfidf_ngram_max }}" min="1" max="3">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="cv_folds">CV folds</label>
+                        <input type="number" id="cv_folds" name="cv_folds" value="{{ config.cv_folds }}" min="2" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label for="optuna_trials">Optuna trials</label>
+                        <input type="number" id="optuna_trials" name="optuna_trials" value="{{ config.optuna_trials }}" min="5" max="200">
+                    </div>
+                    <div class="form-group">
+                        <label for="optuna_timeout">Optuna timeout (sec, blank=none)</label>
+                        <input type="text" id="optuna_timeout" name="optuna_timeout" value="{{ config.optuna_timeout_sec or '' }}" placeholder="e.g. 300">
+                    </div>
+                </div>
+                <button type="submit" class="btn">Save Config</button>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2>Run Bayesian Optimization</h2>
+            <p>Uses the last uploaded dataset. Upload a CSV first via the main page.</p>
+            <form action="/models/optimize" method="post">
+                <div class="form-group">
+                    <label for="target">Target column (optional, auto if blank)</label>
+                    <input type="text" id="target" name="target" placeholder="e.g. Amount">
+                </div>
+                <button type="submit" class="btn primary">Run Optimization</button>
+            </form>
+        </section>
+    </div>
+</body>
+</html>

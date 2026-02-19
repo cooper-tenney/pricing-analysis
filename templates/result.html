@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Run Results</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Run Summary</h1>
+        <a href="/" class="back">← Back to upload</a>
+        <a href="/models" class="back" style="margin-left: 1rem;">Model Settings</a>
+
+        {% if summary.error %}
+        <div class="error">{{ summary.error }}</div>
+        {% else %}
+
+        <section class="card">
+            <h2>Target &amp; Config</h2>
+            <ul>
+                <li><strong>Model:</strong> {{ summary.model_name or 'xgboost' }}{% if summary.model_params %} (optimized){% endif %}</li>
+                <li><strong>Selected target:</strong> {{ summary.selected_target }} ({{ summary.target_source }})</li>
+                <li><strong>Log1p:</strong> {{ "Yes" if summary.log1p_used else "No" }} — {{ summary.log1p_reason }}</li>
+                {% if summary.dropped_leakage %}
+                <li><strong>Dropped leakage:</strong> {{ summary.dropped_leakage | join(", ") }}</li>
+                {% endif %}
+                {% if summary.dropped_id_like %}
+                <li><strong>Dropped ID-like:</strong> {{ summary.dropped_id_like | join(", ") }}</li>
+                {% endif %}
+                {% if engineered_numeric_cols is defined and engineered_numeric_cols %}
+                <li><strong>Numeric engineering applied to:</strong> {{ engineered_numeric_cols | join(", ") }}</li>
+                {% endif %}
+                {% if skipped_numeric_cols is defined and skipped_numeric_cols %}
+                <li><strong>Skipped numeric:</strong> {% for c, r in skipped_numeric_cols.items() %}{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}</li>
+                {% endif %}
+            </ul>
+        </section>
+
+        {% if summary.metrics and not summary.dry_run %}
+        <section class="card">
+            <h2>Metrics</h2>
+            <table>
+                <thead>
+                    <tr><th>Split</th><th>RMSE</th><th>MAE</th><th>R²</th></tr>
+                </thead>
+                <tbody>
+                    {% for split, m in summary.metrics.items() %}
+                    <tr>
+                        <td>{{ split }}</td>
+                        <td>{{ "%.4f" | format(m.get("RMSE_$", m.get("RMSE", 0))) }}</td>
+                        <td>{{ "%.4f" | format(m.get("MAE_$", m.get("MAE", 0))) }}</td>
+                        <td>{{ "%.4f" | format(m.get("R2_$", m.get("R2", 0))) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        {% if summary.top_perm_importance %}
+        <section class="card">
+            <h2>Top 10 Permutation Importance</h2>
+            <table>
+                <thead>
+                    <tr><th>Column</th><th>Importance</th></tr>
+                </thead>
+                <tbody>
+                    {% for row in summary.top_perm_importance %}
+                    <tr><td>{{ row.column }}</td><td>{{ "%.4f" | format(row.importance) }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+        {% endif %}
+
+        {% if summary.ui_summary_preview %}
+        <section class="card">
+            <h2>UI Summary Preview (top 20 rows)</h2>
+            {% if 'description' in summary.ui_summary_columns %}
+            <button type="button" class="btn btn-small" id="toggle-desc">Show description</button>
+            {% endif %}
+            <div class="table-wrap table-scroll">
+                <table class="ui-summary-table" id="ui-summary-table">
+                    <thead>
+                        <tr>
+                            {% for col in summary.ui_summary_columns %}
+                            <th {% if col == 'description' %}class="col-description" style="display:none"{% elif col == 'severity' %}class="sortable active" data-sort="severity"{% elif col == 'missing_pct' %}class="sortable" data-sort="missing_pct"{% endif %}>
+                                {{ col }}
+                                {% if col == 'severity' or col == 'missing_pct' %}
+                                <span class="sort-icon" aria-hidden="true">↕</span>
+                                {% endif %}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in summary.ui_summary_preview %}
+                        <tr class="sev-{{ (row.get('severity') or 0) | int }}" data-severity="{{ (row.get('severity') or 0) | int }}" data-missing-pct="{{ (row.get('missing_pct') or 0) | float }}">
+                            {% for col in summary.ui_summary_columns %}
+                            <td class="{% if col == 'description' %}col-description{% endif %}" {% if col == 'description' %}style="display:none"{% endif %}>
+                                {% if col == 'severity' %}
+                                <span class="badge badge-sev-{{ (row.get(col) or 0) | int }}">{{ row.get(col, 0) }}</span>
+                                {% elif col == 'reasons' or col == 'flags' %}
+                                <span class="truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ row.get(col, '') or '' }}</span>
+                                {% elif col == 'description' %}
+                                <span class="truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ row.get(col, '') or '' }}</span>
+                                {% else %}
+                                {{ row.get(col, "") }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <script>
+        (function() {
+            var toggleBtn = document.getElementById('toggle-desc');
+            var descCols = document.querySelectorAll('.col-description');
+            var descVisible = false;
+            if (toggleBtn && descCols.length) {
+                toggleBtn.addEventListener('click', function() {
+                    descVisible = !descVisible;
+                    descCols.forEach(function(el) { el.style.display = descVisible ? '' : 'none'; });
+                    toggleBtn.textContent = descVisible ? 'Hide description' : 'Show description';
+                });
+            }
+            var table = document.getElementById('ui-summary-table');
+            if (!table) return;
+            var tbody = table.querySelector('tbody');
+            var headers = table.querySelectorAll('th.sortable');
+            var sortCol = 'severity';
+            var sortAsc = false;
+            function sort() {
+                var rows = Array.from(tbody.querySelectorAll('tr'));
+                rows.sort(function(a, b) {
+                    var av, bv;
+                    if (sortCol === 'severity') {
+                        av = parseInt(a.dataset.severity || 0, 10);
+                        bv = parseInt(b.dataset.severity || 0, 10);
+                    } else {
+                        av = parseFloat(a.dataset.missingPct || 0);
+                        bv = parseFloat(b.dataset.missingPct || 0);
+                    }
+                    if (av !== bv) return sortAsc ? av - bv : bv - av;
+                    return 0;
+                });
+                rows.forEach(function(r) { tbody.appendChild(r); });
+            }
+            headers.forEach(function(th) {
+                th.addEventListener('click', function() {
+                    var col = th.dataset.sort;
+                    if (!col) return;
+                    sortAsc = sortCol === col ? !sortAsc : (col === 'severity' ? false : true);
+                    sortCol = col;
+                    headers.forEach(function(h) { h.classList.remove('active'); });
+                    th.classList.add('active');
+                    sort();
+                });
+            });
+        })();
+        </script>
+        {% endif %}
+
+        <section class="card">
+            <h2>Reports &amp; Artifacts</h2>
+            <div class="artifacts">
+                {% if not summary.dry_run %}
+                <a href="/view/{{ run_id }}/report.pdf" class="btn" target="_blank">View Feature Report</a>
+                {% endif %}
+                <a href="/view/{{ run_id }}/audit_report.pdf" class="btn" target="_blank">View Audit Report</a>
+                <a href="/download_zip/{{ run_id }}" class="btn primary">Download All Artifacts (ZIP)</a>
+            </div>
+            <ul class="links">
+                <li><a href="/download/{{ run_id }}/ui_summary.csv">ui_summary.csv</a></li>
+                <li><a href="/download/{{ run_id }}/ui_summary.md">ui_summary.md</a></li>
+                {% if not summary.dry_run %}
+                <li><a href="/download/{{ run_id }}/permutation_importance.csv">permutation_importance.csv</a></li>
+                {% endif %}
+                <li><a href="/download/{{ run_id }}/run_config.json">run_config.json</a></li>
+            </ul>
+        </section>
+        {% endif %}
+    </div>
+</body>
+</html>

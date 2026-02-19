@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Settings</title>
+    <link rel="stylesheet" href="/static/style.css">
+    {% set s = (opt_status.status | default("")) if opt_status else "" %}
+    {% if s == "running" or s == "stopping" %}
+    <meta http-equiv="refresh" content="2">
+    {% endif %}
+</head>
+<body>
+    <div class="container">
+        <h1>Model Settings &amp; Bayesian Optimization</h1>
+        {% if opt_status and opt_status.status in ("finished", "stopped") %}
+        <div class="nav-actions">
+            <a href="/results" class="btn primary">View Results</a>
+            <a href="/models/config" class="btn">Modify Model</a>
+            <a href="/" class="btn">Upload New Dataset</a>
+        </div>
+        {% else %}
+        <a href="/" class="back">← Back to upload</a>
+        <a href="/models/config" class="back" style="margin-left: 1rem;">Modify Config</a>
+        {% endif %}
+
+        {% if error %}
+        <div class="banner banner-error">{{ error }}</div>
+        {% endif %}
+        {% if config_meta and config_meta.saved_at %}
+        <div class="banner banner-saved">Config saved at {{ config_meta.saved_at[:19] if config_meta.saved_at else '' }}</div>
+        {% endif %}
+
+        <section class="card status-card">
+            <h2>Status</h2>
+            <ul>
+                <li><strong>Config:</strong> {% if config_meta %}saved{% else %}not saved{% endif %}</li>
+                <li><strong>Optimization:</strong>
+                    {% if opt_status %}
+                    {{ "Stopping..." if opt_status.status == "stopping" else opt_status.status }}
+                    {% if opt_status and 'completed_trials' in opt_status and 'total_trials' in opt_status %}
+                    ({{ opt_status.completed_trials }}/{{ opt_status.total_trials }})
+                    {% endif %}
+                    {% if opt_status and 'best_score' in opt_status and opt_status.best_score is not none %}
+                    — best score: {{ "%.4f" | format(opt_status.best_score) }}
+                    {% endif %}
+                    {% if opt_status.last_updated %}
+                    — {{ opt_status.last_updated[:19] }}
+                    {% endif %}
+                    {% if opt_status.error %}
+                    — {{ opt_status.error }}
+                    {% endif %}
+                    {% else %}
+                    —
+                    {% endif %}
+                </li>
+            </ul>
+            {% if opt_status and opt_status.status in ("running", "stopping") %}
+            <form action="/models/stop_opt" method="post" style="display: inline;">
+                <button type="submit" class="btn btn-danger" {% if opt_status.status == "stopping" %}disabled{% endif %}>Stop Optimization</button>
+            </form>
+            {% endif %}
+        </section>
+
+        <section class="card">
+            <h2>Current Config</h2>
+            <ul>
+                <li><strong>Model:</strong> {{ config.model_name }}</li>
+                <li><strong>Text mode:</strong> {{ config.text_mode }}</li>
+                <li><strong>TF-IDF:</strong> max_features={{ config.tfidf_max_features }}, ngram_max={{ config.tfidf_ngram_max }}</li>
+                <li><strong>CV folds:</strong> {{ config.cv_folds }}</li>
+                <li><strong>Optuna trials:</strong> {{ config.optuna_trials }}</li>
+                <li><strong>Best params:</strong> {% if config.best_params %}Yes (from optimization){% else %}None{% endif %}</li>
+            </ul>
+        </section>
+
+        {% if optuna_best %}
+        <section class="card">
+            <h2>Last Optimization Results</h2>
+            <p><strong>Best CV RMSE:</strong> {{ "%.4f" | format(optuna_best.best_score) }}</p>
+            <p><strong>Best params:</strong></p>
+            <pre>{% for k, v in optuna_best.best_params.items() %}{{ k }}: {{ v }}
+{% endfor %}</pre>
+            <a href="/models/download_study" class="btn">Download optuna_study.csv</a>
+        </section>
+        {% endif %}
+
+        <section class="card">
+            <a href="/models/config" class="btn primary">Modify Config</a>
+        </section>
+    </div>
+</body>
+</html>

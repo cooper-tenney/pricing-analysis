@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing Analysis</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Pricing Analysis Pipeline</h1>
+        <p class="subtitle">Upload a CSV or PDF to run the full pipeline: clean → summarize → audit → model → report.</p>
+        {% if last_run_id %}
+        <p class="resume-link"><a href="/results">Resume last run</a></p>
+        {% endif %}
+
+        <form action="/run" method="post" enctype="multipart/form-data" class="upload-form">
+            <div class="form-group">
+                <label for="file">Data file (CSV or PDF)</label>
+                <input type="file" id="file" name="file" accept=".csv,.pdf" required>
+            </div>
+            <div class="form-group">
+                <label for="target">Target column (optional, auto-inferred if blank)</label>
+                <input type="text" id="target" name="target" placeholder="e.g. Amount">
+            </div>
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="dry_run" value="1"> Dry run (no training, audit only)
+                </label>
+            </div>
+            <div class="form-group checkbox">
+                <label>
+                    <input type="checkbox" name="summarize_columns" value="1"> Use LLM for column descriptions (requires OPENAI_API_KEY)
+                </label>
+            </div>
+            <button type="submit" class="btn">Run Pipeline</button>
+        </form>
+    </div>
+</body>
+</html>
