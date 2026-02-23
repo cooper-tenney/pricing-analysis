@@ -3,16 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Model Settings</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Model Settings — Pricing Audit</title>
+    <link rel="stylesheet" href="/static/styles.css">
     {% set s = (opt_status.status | default("")) if opt_status else "" %}
     {% if s == "running" or s == "stopping" %}
     <meta http-equiv="refresh" content="2">
     {% endif %}
 </head>
 <body>
+    <header class="app-header">
+        <div class="app-header-inner">
+            <span class="app-brand">Pricing Audit</span>
+            <nav class="app-nav">
+                <a href="/results" class="btn btn-ghost">View results</a>
+                <a href="/" class="btn btn-primary">Upload new dataset</a>
+            </nav>
+        </div>
+    </header>
+    <main class="main-content">
     <div class="container">
-        <h1>Model Settings &amp; Bayesian Optimization</h1>
+        <h1>Model settings</h1>
         {% if opt_status and opt_status.status in ("finished", "stopped") %}
         <div class="nav-actions">
             <a href="/results" class="btn primary">View Results</a>
@@ -21,7 +31,7 @@
         </div>
         {% else %}
         <a href="/" class="back">← Back to upload</a>
-        <a href="/models/config" class="back" style="margin-left: 1rem;">Modify Config</a>
+        <a href="/models/config" class="back" style="margin-left: 1rem;">Modify config</a>
         {% endif %}
 
         {% if error %}
@@ -86,8 +96,9 @@
         {% endif %}
 
         <section class="card">
-            <a href="/models/config" class="btn primary">Modify Config</a>
+            <a href="/models/config" class="btn btn-primary">Modify config</a>
         </section>
     </div>
+    </main>
 </body>
 </html>
