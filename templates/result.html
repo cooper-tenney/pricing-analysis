@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Run Results</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <div class="container">
@@ -98,11 +98,13 @@
                         {% for row in summary.ui_summary_preview %}
                         <tr class="sev-{{ (row.get('severity') or 0) | int }}" data-severity="{{ (row.get('severity') or 0) | int }}" data-missing-pct="{{ (row.get('missing_pct') or 0) | float }}">
                             {% for col in summary.ui_summary_columns %}
-                            <td class="{% if col == 'description' %}col-description{% endif %}" {% if col == 'description' %}style="display:none"{% endif %}>
+                            <td class="{% if col == 'description' %}col-description{% endif %}{% if col == 'flags_pretty' or col == 'key_issue' or col == 'reason_pretty' or col == 'stats_pretty' %} wrap col-flags{% endif %}" {% if col == 'description' %}style="display:none"{% endif %}>
                                 {% if col == 'severity' %}
                                 <span class="badge badge-sev-{{ (row.get(col) or 0) | int }}">{{ row.get(col, 0) }}</span>
-                                {% elif col == 'reasons' or col == 'flags' %}
-                                <span class="truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ row.get(col, '') or '' }}</span>
+                                {% elif col == 'flags_pretty' %}
+                                <span class="chip-wrap">{% for part in (row.get(col) or '') | split_flags %}<span class="chip">{{ part }}</span>{% endfor %}</span>
+                                {% elif col == 'key_issue' or col == 'reason_pretty' or col == 'stats_pretty' %}
+                                <span class="wrap">{{ row.get(col, '') or '' }}</span>
                                 {% elif col == 'description' %}
                                 <span class="truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ row.get(col, '') or '' }}</span>
                                 {% else %}

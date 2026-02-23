@@ -46,6 +46,22 @@ def _robust_z_score(ser: pd.Series) -> tuple[int, float]:
     return int(extreme), max_mag
 
 
+def _negative_values_reason(ser: pd.Series) -> tuple[int, float, float, str]:
+    """Return (count_neg, pct_neg, min_val, reason_str) for numeric cols with negatives."""
+    if not pd.api.types.is_numeric_dtype(ser):
+        return 0, 0.0, 0.0, ""
+    valid = ser.dropna()
+    if len(valid) == 0:
+        return 0, 0.0, 0.0, ""
+    neg = valid < 0
+    count_neg = int(neg.sum())
+    if count_neg == 0:
+        return 0, 0.0, float(valid.min()), ""
+    pct = count_neg / len(valid) * 100
+    min_val = float(valid.min())
+    return count_neg, pct, min_val, f"Negative values: {count_neg} ({pct:.1f}%), min={min_val:g}"
+
+
 def _is_near_constant(ser: pd.Series) -> tuple[bool, str]:
     """Check if column is near-constant. Returns (is_near_constant, reason)."""
     nunique = ser.nunique(dropna=True)
@@ -121,8 +137,9 @@ def _is_potential_leakage(col_name: str, target_col: Optional[str]) -> tuple[boo
 def audit_columns(df: pd.DataFrame, target_col: Optional[str] = None) -> pd.DataFrame:
     """
     Generate audit report with flags: high_missing, extreme_outliers, near_constant,
-    high_cardinality, suspicious_id_like, potential_leakage.
-    Each flag has severity 0-3 and a short reason. Does not modify or drop any columns.
+    high_cardinality, suspicious_id_like, potential_leakage, negative_values.
+    Each flag has severity 0-3 and explicit numeric reason. Returns columns:
+    column, dtype, missing_pct, nunique, flags, severity, reason, stats (compact <=120 chars).
     """
     nrows = len(df)
     rows = []
@@ -134,28 +151,50 @@ def audit_columns(df: pd.DataFrame, target_col: Optional[str] = None) -> pd.Data
         flags = []
         max_severity = 0
         reasons = []
+        stats_parts = []
 
         # high_missing
         if missing_pct > HIGH_MISSING_PCT:
             sev = 3 if missing_pct > 80 else (2 if missing_pct > 60 else 1)
             flags.append("high_missing")
-            reasons.append(f"missing_pct={missing_pct:.0f}")
+            reasons.append(f"Missing {missing_pct:.1f}% of values")
+            stats_parts.append(f"missing_pct={missing_pct:.1f}")
+            max_severity = max(max_severity, sev)
+
+        # negative_values (numeric only)
+        count_neg, pct_neg, min_val, neg_reason = _negative_values_reason(ser)
+        if count_neg > 0:
+            is_target = target_col and col == target_col
+            sev = 3 if is_target else 2
+            flags.append("negative_values")
+            reasons.append(neg_reason)
+            stats_parts.append(f"count_neg={count_neg} pct_neg={pct_neg:.1f} min={min_val:g}")
             max_severity = max(max_severity, sev)
 
         # extreme_outliers (numeric only)
         if pd.api.types.is_numeric_dtype(ser):
-            count, max_mag = _robust_z_score(ser)
-            if count > 0:
-                sev = 2 if count > 10 else 1
-                flags.append("extreme_outliers")
-                reasons.append(f"count={count}, max_z={max_mag:.1f}")
-                max_severity = max(max_severity, sev)
+            valid = ser.dropna()
+            if len(valid) >= 4:
+                count, max_mag = _robust_z_score(ser)
+                if count > 0:
+                    sev = 2 if count > 10 else 1
+                    flags.append("extreme_outliers")
+                    p1 = float(np.percentile(valid, 1))
+                    p50 = float(np.percentile(valid, 50))
+                    p99 = float(np.percentile(valid, 99))
+                    mx = float(valid.max())
+                    reasons.append(
+                        f"Outliers: p50={p50:g}, p99={p99:g}, max={mx:g}; flagged={count}"
+                    )
+                    stats_parts.append(f"p1={p1:g} p50={p50:g} p99={p99:g} max={mx:g} flagged={count}")
+                    max_severity = max(max_severity, sev)
 
         # near_constant
         is_nc, nc_reason = _is_near_constant(ser)
         if is_nc:
             flags.append("near_constant")
-            reasons.append(nc_reason)
+            reasons.append(f"Near constant: {nc_reason}")
+            stats_parts.append(nc_reason)
             max_severity = max(max_severity, 1)
 
         # high_cardinality (categorical)
@@ -163,14 +202,16 @@ def audit_columns(df: pd.DataFrame, target_col: Optional[str] = None) -> pd.Data
             if nunique > HIGH_CARDINALITY_NUNIQUE:
                 sev = 2 if nunique > 500 else 1
                 flags.append("high_cardinality")
-                reasons.append(f"nunique={nunique}")
+                reasons.append(f"High cardinality: nunique={nunique} (nrows={nrows})")
+                stats_parts.append(f"nunique={nunique} nrows={nrows}")
                 max_severity = max(max_severity, sev)
 
         # suspicious_id_like
         is_id, id_reason = _is_id_like(col, ser, nrows)
         if is_id:
             flags.append("suspicious_id_like")
-            reasons.append(id_reason)
+            reasons.append(f"ID-like: {id_reason}")
+            stats_parts.append(f"nunique={nunique} nrows={nrows}")
             max_severity = max(max_severity, 2)
 
         # potential_leakage
@@ -181,6 +222,10 @@ def audit_columns(df: pd.DataFrame, target_col: Optional[str] = None) -> pd.Data
             max_severity = max(max_severity, 3)
 
         reason_str = "; ".join(reasons) if reasons else ""
+        stats_str = "; ".join(stats_parts)
+        if len(stats_str) > 120:
+            stats_str = stats_str[:117] + "..."
+
         rows.append({
             "column": col,
             "dtype": str(ser.dtype),
@@ -189,6 +234,7 @@ def audit_columns(df: pd.DataFrame, target_col: Optional[str] = None) -> pd.Data
             "flags": " | ".join(flags) if flags else "",
             "severity": max_severity,
             "reason": reason_str,
+            "stats": stats_str,
         })
 
     return pd.DataFrame(rows)

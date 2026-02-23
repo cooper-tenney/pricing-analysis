@@ -3,15 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Model Config</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Model Config — Pricing Audit</title>
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+    <header class="app-header">
+        <div class="app-header-inner">
+            <span class="app-brand">Pricing Audit</span>
+            <nav class="app-nav">
+                <a href="/models" class="btn btn-ghost">Model settings</a>
+                <a href="/results" class="btn btn-ghost">View results</a>
+                <a href="/" class="btn btn-primary">Upload new dataset</a>
+            </nav>
+        </div>
+    </header>
+    <main class="main-content">
     <div class="container">
-        <h1>Model Config</h1>
-        <a href="/models" class="back">← Back to Model Settings</a>
-        <a href="/results" class="back" style="margin-left: 1rem;">View Results</a>
-        <a href="/" class="back" style="margin-left: 1rem;">Upload New Dataset</a>
+        <h1>Model config</h1>
+        <a href="/models" class="back">← Back to model settings</a>
+        <a href="/results" class="back" style="margin-left: 1rem;">View results</a>
+        <a href="/" class="back" style="margin-left: 1rem;">Upload new dataset</a>
 
         {% if error %}
         <div class="banner banner-error">{{ error }}</div>
@@ -94,9 +105,10 @@
                     <label for="target">Target column (optional, auto if blank)</label>
                     <input type="text" id="target" name="target" placeholder="e.g. Amount">
                 </div>
-                <button type="submit" class="btn primary">Run Optimization</button>
+                <button type="submit" class="btn btn-primary">Run optimization</button>
             </form>
         </section>
     </div>
+    </main>
 </body>
 </html>

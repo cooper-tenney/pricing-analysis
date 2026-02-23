@@ -3,12 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pricing Analysis</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Pricing Audit — Upload</title>
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+    <header class="app-header">
+        <div class="app-header-inner">
+            <span class="app-brand">Pricing Audit</span>
+            <nav class="app-nav">
+                <a href="/models/config" class="btn btn-ghost">Model settings</a>
+                <a href="/results" class="btn btn-ghost">View results</a>
+            </nav>
+        </div>
+    </header>
+    <main class="main-content">
     <div class="container">
-        <h1>Pricing Analysis Pipeline</h1>
+        <h1>Upload dataset</h1>
         <p class="subtitle">Upload a CSV or PDF to run the full pipeline: clean → summarize → audit → model → report.</p>
         {% if last_run_id %}
         <p class="resume-link"><a href="/results">Resume last run</a></p>
@@ -33,8 +43,9 @@
                     <input type="checkbox" name="summarize_columns" value="1"> Use LLM for column descriptions (requires OPENAI_API_KEY)
                 </label>
             </div>
-            <button type="submit" class="btn">Run Pipeline</button>
+            <button type="submit" class="btn btn-primary">Run pipeline</button>
         </form>
     </div>
+    </main>
 </body>
 </html>
