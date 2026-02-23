@@ -44,17 +44,221 @@ def _feature_to_column(name: str) -> str:
     return rest
 
 
+def _safe_str(x) -> str:
+    """Return empty string for NaN/None, else str(x). Avoid literal 'nan'."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return ""
+    s = str(x).strip()
+    return "" if s.lower() == "nan" else s
+
+
+def _title_case_flags(s: str, join_char: str = " • ") -> str:
+    """Title-case and replace underscores with spaces. Join with join_char. Never return 'nan'."""
+    out = _safe_str(s)
+    if not out:
+        return ""
+    parts = [p.strip().replace("_", " ").title() for p in out.split("|")]
+    return join_char.join(p for p in parts if p)
+
+
+def _derive_key_issue(flags: str, reason: str, stats: str, max_len: int = 90) -> str:
+    """Derive a single short sentence (<=max_len) from flags + top metric."""
+    import re
+    flags = _safe_str(flags)
+    reason = _safe_str(reason)
+    stats = _safe_str(stats)
+    if not flags:
+        return ""
+    parts = []
+    # negative_values: "310 negatives (3.6%), min=-121,973"
+    if "negative_values" in flags:
+        m = re.search(r"Negative values: (\d+) \(([\d.]+)%\), min=([-\d.eE+]+)", reason)
+        if m:
+            cnt, pct, mn = m.group(1), m.group(2), m.group(3)
+            try:
+                mn_f = float(mn)
+                mn_fmt = f"{mn_f:,.0f}" if abs(mn_f) >= 1000 else str(mn_f)
+            except ValueError:
+                mn_fmt = mn
+            parts.append(f"{cnt} negatives ({pct}%), min={mn_fmt}")
+        else:
+            parts.append("Contains negative values")
+    # extreme_outliers: "Outliers: p99=52,273; max=240,000"
+    if "extreme_outliers" in flags and not parts:
+        m = re.search(r"p99=([\d.eE+-]+).*max=([\d.eE+-]+)", reason)
+        if m:
+            p99, mx = m.group(1), m.group(2)
+            try:
+                p99_f, mx_f = float(p99), float(mx)
+                p99_fmt = f"{p99_f:,.0f}" if abs(p99_f) >= 100 else str(p99_f)
+                mx_fmt = f"{mx_f:,.0f}" if abs(mx_f) >= 100 else str(mx_f)
+            except ValueError:
+                p99_fmt, mx_fmt = p99, mx
+            parts.append(f"Outliers: p99={p99_fmt}; max={mx_fmt}")
+        else:
+            parts.append("Extreme outliers detected")
+    # suspicious_id_like
+    if "suspicious_id_like" in flags and not parts:
+        parts.append("ID-like: nunique≈nrows")
+    # high_cardinality
+    if "high_cardinality" in flags and not parts:
+        m = re.search(r"nunique=(\d+)", stats)
+        if m:
+            nu = int(m.group(1))
+            parts.append(f"High cardinality: {nu:,} unique")
+        else:
+            parts.append("High cardinality")
+    # near_constant
+    if "near_constant" in flags and not parts:
+        m = re.search(r"nunique=(\d+)|dominant category ([\d.]+)%", reason + " " + stats)
+        if m:
+            if m.group(1):
+                parts.append(f"Near constant: nunique={m.group(1)}")
+            else:
+                parts.append(f"Near constant: {m.group(2)}% dominant")
+        else:
+            parts.append("Near constant")
+    # potential_leakage
+    if "potential_leakage" in flags and not parts:
+        m = re.search(r"name contains: ([^;]+)", reason)
+        if m:
+            parts.append(f"Leakage: {m.group(1).strip()[:40]}")
+        else:
+            parts.append("Potential leakage")
+    # high_missing
+    if "high_missing" in flags and not parts:
+        m = re.search(r"Missing ([\d.]+)%", reason)
+        if m:
+            parts.append(f"Missing {m.group(1)}%")
+        else:
+            parts.append("High missing")
+    out = "; ".join(parts[:2])[:max_len]
+    return out.rstrip("; ")
+
+
+def _truncate(s: str, max_len: int, ellipsis: str = "…") -> str:
+    """Truncate with ellipsis if longer than max_len."""
+    out = _safe_str(s)
+    if not out or len(out) <= max_len:
+        return out
+    return out[: max_len - len(ellipsis)] + ellipsis
+
+
 def build_ui_df(summary_df: pd.DataFrame, audit_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Build ui_df with display + detail columns. Sorted by severity desc, missing_pct desc, nunique desc.
+    Display: severity, column, dtype, missing_pct, nunique, flags_pretty, key_issue (short).
+    Detail (for expanders/PDF): detail_reason, detail_stats.
+    """
     summary_sub = summary_df[["column", "dtype", "missing_pct", "nunique", "description", "confidence"]].copy()
-    audit_sub = audit_df[["column", "flags", "severity", "reason"]].copy()
+    audit_cols = ["column", "flags", "severity", "reason", "stats"]
+    audit_cols = [c for c in audit_cols if c in audit_df.columns]
+    audit_sub = audit_df[audit_cols].copy()
     audit_sub = audit_sub.rename(columns={"reason": "reasons"})
     ui = summary_sub.merge(audit_sub, on="column", how="outer")
-    ui["flags"] = ui["flags"].fillna("")
+
+    for c in ["flags", "reasons", "stats", "description", "confidence"]:
+        if c in ui.columns:
+            ui[c] = ui[c].apply(_safe_str)
     ui["severity"] = ui["severity"].fillna(0).astype(int)
-    ui["reasons"] = ui["reasons"].fillna("")
-    ui["description"] = ui["description"].fillna("")
-    ui["confidence"] = ui["confidence"].fillna("")
+    ui["missing_pct"] = ui["missing_pct"].fillna(0).round(1)
+    ui["nunique"] = ui["nunique"].fillna(0).astype(int)
+
+    # flags_pretty: title-case, join with " • " (short for table)
+    flags_raw = ui["flags"].fillna("")
+    ui["flags_pretty"] = flags_raw.apply(lambda s: _title_case_flags(s, join_char=" • "))
+    # key_issue: single short sentence <=90 chars
+    ui["key_issue"] = ui.apply(
+        lambda r: _derive_key_issue(
+            r.get("flags", ""), r.get("reasons", ""), r.get("stats", "")
+        ),
+        axis=1,
+    )
+    ui["key_issue"] = ui["key_issue"].fillna("").apply(_safe_str)
+    # detail fields (full text, not in main table)
+    ui["detail_reason"] = ui["reasons"].apply(_safe_str)
+    ui["detail_stats"] = ui["stats"].apply(_safe_str)
+    # legacy aliases for compatibility
+    ui["reason_pretty"] = ui["detail_reason"].apply(lambda s: _truncate(s, 140))
+    ui["stats_pretty"] = ui["detail_stats"].apply(lambda s: _truncate(s, 120))
+
+    out_cols = [
+        "column", "dtype", "description", "confidence",
+        "missing_pct", "nunique", "severity",
+        "flags_pretty", "key_issue",
+        "detail_reason", "detail_stats", "reason_pretty", "stats_pretty",
+    ]
+    ui = ui[[c for c in out_cols if c in ui.columns]]
+    ui = ui.sort_values(
+        ["severity", "missing_pct", "nunique"],
+        ascending=[False, False, False],
+    ).reset_index(drop=True)
     return ui
+
+
+def build_ui_display(ui_df: pd.DataFrame) -> pd.DataFrame:
+    """Compact display version for tables: short columns only, no overflow."""
+    cols = ["severity", "column", "dtype", "missing_pct", "nunique", "flags_pretty", "key_issue"]
+    cols = [c for c in cols if c in ui_df.columns]
+    return ui_df[cols].copy()
+
+
+def _severity_badge(sev: int) -> str:
+    """Severity badge for markdown/console: 🔴3, 🟠2, 🟡1, ⚪0."""
+    badges = {3: "🔴 3", 2: "🟠 2", 1: "🟡 1", 0: "⚪ 0"}
+    return badges.get(int(sev), "⚪ 0")
+
+
+def write_ui_summary_md(
+    ui_df: pd.DataFrame,
+    output_path: Path,
+    input_name: str,
+    selected_target: str,
+    top_n: int = 25,
+) -> None:
+    """Write pretty markdown with title, legend, and top N worst rows table."""
+    lines = [
+        f"# Column Audit Summary",
+        "",
+        f"**File:** {input_name}  |  **Target:** {selected_target}",
+        "",
+        "## Legend",
+        "",
+        "| Severity | Meaning |",
+        "|----------|---------|",
+        "| 🔴 3 | Critical (high missing, leakage, negatives in target) |",
+        "| 🟠 2 | Warning (outliers, ID-like, high cardinality) |",
+        "| 🟡 1 | Minor (near constant) |",
+        "| ⚪ 0 | Clean |",
+        "",
+        "## Top {} worst columns (by severity, missing %, nunique)".format(top_n),
+        "",
+    ]
+    worst = ui_df.head(top_n)
+    if worst.empty:
+        lines.append("*No columns to display.*")
+    else:
+        tbl = worst.copy()
+        tbl["severity_badge"] = tbl["severity"].apply(_severity_badge)
+        display_cols = ["severity_badge", "column", "dtype", "missing_pct", "nunique", "flags_pretty", "key_issue"]
+        display_cols = [c for c in display_cols if c in tbl.columns]
+        tbl = tbl[display_cols].copy()
+        for c in ["column", "flags_pretty", "key_issue"]:
+            if c in tbl.columns:
+                tbl[c] = tbl[c].apply(lambda s: _truncate(_safe_str(s), 48))
+        # Build pipe-style markdown table
+        rows = []
+        rows.append("| " + " | ".join(str(c) for c in tbl.columns) + " |")
+        rows.append("|" + "|".join("---" for _ in tbl.columns) + "|")
+        for _, r in tbl.iterrows():
+            cells = []
+            for c in tbl.columns:
+                v = r[c]
+                v = "" if (v is None or (isinstance(v, float) and pd.isna(v)) or str(v).lower() == "nan") else str(v)
+                cells.append(v.replace("|", "\\|"))
+            rows.append("| " + " | ".join(cells) + " |")
+        lines.append("\n".join(rows))
+    output_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def run_pipeline(
@@ -121,12 +325,16 @@ def run_pipeline(
         ui_df = build_ui_df(summary_df, audit_df)
         ui_csv = run_dir / "ui_summary.csv"
         ui_md = run_dir / "ui_summary.md"
+        ui_display_csv = run_dir / "ui_summary_display.csv"
         ui_df.to_csv(ui_csv, index=False)
-        try:
-            md = ui_df.to_markdown(index=False)
-        except (AttributeError, ImportError):
-            md = ui_df.to_string(index=False)
-        ui_md.write_text(md, encoding="utf-8")
+        build_ui_display(ui_df).to_csv(ui_display_csv, index=False)
+        write_ui_summary_md(
+            ui_df,
+            ui_md,
+            input_name=input_name,
+            selected_target=target_name,
+            top_n=25,
+        )
 
         safe_numeric_cols = drops.get("safe_numeric_cols", [])
         unsafe_numeric_cols = drops.get("unsafe_numeric_cols", [])
@@ -233,11 +441,11 @@ def run_pipeline(
         summary["model_params"] = model_params
         summary["paths"]["ui_summary.csv"] = str(ui_csv)
         summary["paths"]["ui_summary.md"] = str(ui_md)
+        summary["paths"]["ui_summary_display.csv"] = str(ui_display_csv)
         summary["paths"]["audit_report.pdf"] = str(run_dir / "audit_report.pdf")
         summary["paths"]["run_config.json"] = str(run_dir / "run_config.json")
 
-        worst = ui_df.sort_values(["severity", "missing_pct", "nunique"], ascending=[False, False, False]).head(20)
-        summary["ui_summary_preview"] = worst.to_dict(orient="records")
+        summary["ui_summary_preview"] = ui_df.head(20).to_dict(orient="records")
 
         # Audit-only: stop here. Full pipeline continues with training, perm importance, report.pdf.
         if dry_run:

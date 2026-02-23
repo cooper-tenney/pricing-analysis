@@ -37,27 +37,59 @@ def _wrap_list(items: list[str], width: int = 70, indent: str = "    ") -> str:
     return "\n".join(lines)
 
 
-def print_ui_summary(ui_df: pd.DataFrame, top_n: int, max_reason_len: int = 45) -> None:
+def _severity_badge(sev: int) -> str:
+    """Severity badge for console: 🔴3, 🟠2, 🟡1, ⚪0."""
+    badges = {3: "🔴 3", 2: "🟠 2", 1: "🟡 1", 0: "⚪ 0"}
+    return badges.get(int(sev), "⚪ 0")
+
+
+def _truncate(s, max_len: int) -> str:
+    """Truncate with ellipsis."""
+    out = str(s).strip() if pd.notna(s) and str(s).lower() != "nan" else ""
+    if not out or len(out) <= max_len:
+        return out
+    return out[: max_len - 1] + "…"
+
+
+def print_ui_summary(ui_df: pd.DataFrame, top_n: int) -> None:
+    """Print clean fixed-width table of top N worst columns."""
     if top_n <= 0:
         return
-    worst = ui_df.sort_values(
-        ["severity", "missing_pct", "nunique"],
-        ascending=[False, False, False],
-    ).head(top_n)
+    worst = ui_df.head(top_n)
     if worst.empty:
         print("  No columns to display.")
         return
-    print(f"  {'column':<32} {'dtype':<12} {'sev':<3} {'miss%':<6} {'nunique':<7} flags | reasons")
-    print("  " + "-" * 110)
+    w_badge, w_col, w_dtype, w_mpct, w_nu, w_flags, w_reason = 6, 24, 10, 6, 6, 30, 48
+    sep = "  "
+    hdr = sep.join([
+        "sev".ljust(w_badge),
+        "column".ljust(w_col),
+        "dtype".ljust(w_dtype),
+        "miss%".rjust(w_mpct),
+        "nunique".rjust(w_nu),
+        "flags".ljust(w_flags),
+        "reason".ljust(w_reason),
+    ])
+    print("  " + hdr)
+    print("  " + "-" * len(hdr))
     for _, row in worst.iterrows():
-        col = str(row["column"])[:31]
-        dtype = str(row["dtype"])[:11]
-        sev = int(row["severity"])
-        mpct = row["missing_pct"] if pd.notna(row["missing_pct"]) else 0
-        nu = row["nunique"] if pd.notna(row["nunique"]) else 0
-        flags = str(row["flags"])[:25] if pd.notna(row["flags"]) else ""
-        reasons = str(row["reasons"])[:max_reason_len] if pd.notna(row["reasons"]) else ""
-        print(f"  {col:<32} {dtype:<12} {sev:<3} {mpct:<6.1f} {nu:<7} {flags} | {reasons}")
+        badge = _severity_badge(int(row.get("severity", 0)))
+        col = _truncate(row.get("column", ""), w_col)
+        dtype = _truncate(row.get("dtype", ""), w_dtype)
+        mpct = float(row.get("missing_pct", 0) or 0)
+        nu = int(row.get("nunique", 0) or 0)
+        flags = _truncate(row.get("flags_pretty", row.get("flags", "")), w_flags)
+        reason = _truncate(row.get("key_issue", row.get("reason_pretty", row.get("reasons", ""))), w_reason)
+        line = sep.join([
+            badge.ljust(w_badge),
+            col.ljust(w_col),
+            dtype.ljust(w_dtype),
+            f"{mpct:.1f}".rjust(w_mpct),
+            str(nu).rjust(w_nu),
+            flags.ljust(w_flags),
+            reason.ljust(w_reason),
+        ])
+        print("  " + line)
 
 
 def main() -> int:
@@ -162,6 +194,7 @@ def main() -> int:
     ui_md = run_dir / "ui_summary.md"
     print(f"\nSaved to {ui_csv}")
     print(f"Saved to {ui_md}")
+    print("Dashboard: streamlit run ui_app.py")
     if ui_csv.exists() and args.show_ui > 0:
         ui_df = pd.read_csv(ui_csv)
         if "severity" in ui_df.columns:

@@ -1,6 +1,6 @@
 """
 Visualization: matplotlib PDF report for top 5 features vs target.
-Uses target in original dollars. No plotly dependency.
+Uses theme.py for blue-toned styling. No plotly dependency.
 """
 
 from pathlib import Path
@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
+
+from theme import apply_mpl_theme, style_axes, PRIMARY
 
 
 def _raw_column_for_plot(col: str, available: list[str]) -> str:
@@ -50,26 +52,25 @@ def _plot_numeric(
     y_plot = np.clip(y, None, upper)
 
     if len(x) > hexbin_threshold:
-        hb = ax.hexbin(x, y_plot, gridsize=40, mincnt=1, cmap="Blues", alpha=0.8)
+        hb = ax.hexbin(x, y_plot, gridsize=40, mincnt=1, cmap="Blues", alpha=0.6)
         plt.colorbar(hb, ax=ax, label="Count")
     else:
-        ax.scatter(x, y_plot, alpha=0.12, s=6)
+        ax.scatter(x, y_plot, alpha=0.08, s=6)
     ax.set_ylim(0, upper)
     ax.set_xlabel(col, fontsize=9)
     ax.set_ylabel("Target ($)", fontsize=9)
-    ax.annotate("(clipped at p99 for display)", xy=(0.02, 0.98), xycoords="axes fraction", fontsize=7, va="top")
+    ax.annotate("(clipped at p99)", xy=(0.02, 0.98), xycoords="axes fraction", fontsize=7, va="top", color="#64748b")
 
-    # Binned median line on clipped y
+    # Binned median line — theme accent color
     df_temp = pd.DataFrame({"x": x, "y": y_plot})
     df_temp["bin"] = pd.qcut(df_temp["x"], q=min(n_bins, len(df_temp) // 5 or 5), duplicates="drop")
     medians = df_temp.groupby("bin", observed=True).agg({"x": "median", "y": "median"}).reset_index()
     medians = medians.sort_values("x")
-    ax.plot(medians["x"], medians["y"], color="red", linewidth=2, label="Binned median")
+    ax.plot(medians["x"], medians["y"], color=PRIMARY, linewidth=2, label="Binned median")
 
     ax.set_title(f"{col} vs Target (importance: {importance:.3f})", fontsize=10)
     ax.legend(loc="upper right", fontsize=8)
-    ax.tick_params(axis="both", labelsize=8)
-    ax.grid(alpha=0.2)
+    style_axes(ax)
 
 
 def _plot_text_length(
@@ -95,25 +96,24 @@ def _plot_text_length(
     y_plot = np.clip(y, None, upper)
 
     if len(x) > hexbin_threshold:
-        hb = ax.hexbin(x, y_plot, gridsize=40, mincnt=1, cmap="Blues", alpha=0.8)
+        hb = ax.hexbin(x, y_plot, gridsize=40, mincnt=1, cmap="Blues", alpha=0.6)
         plt.colorbar(hb, ax=ax, label="Count")
     else:
-        ax.scatter(x, y_plot, alpha=0.12, s=6)
+        ax.scatter(x, y_plot, alpha=0.08, s=6)
     ax.set_ylim(0, upper)
-    ax.annotate("(clipped at p99 for display)", xy=(0.02, 0.98), xycoords="axes fraction", fontsize=7, va="top")
+    ax.annotate("(clipped at p99)", xy=(0.02, 0.98), xycoords="axes fraction", fontsize=7, va="top", color="#64748b")
 
     df_temp = pd.DataFrame({"x": x, "y": y_plot})
     df_temp["bin"] = pd.qcut(df_temp["x"], q=min(n_bins, len(df_temp) // 5 or 5), duplicates="drop")
     medians = df_temp.groupby("bin", observed=True).agg({"x": "median", "y": "median"}).reset_index()
     medians = medians.sort_values("x")
-    ax.plot(medians["x"], medians["y"], color="red", linewidth=2, label="Binned median")
+    ax.plot(medians["x"], medians["y"], color=PRIMARY, linewidth=2, label="Binned median")
 
     ax.set_xlabel(f"{col} (string length)", fontsize=9)
     ax.set_ylabel("Target ($)", fontsize=9)
     ax.set_title(f"{col} vs Target (importance: {importance:.3f})", fontsize=10)
     ax.legend(loc="upper right", fontsize=8)
-    ax.tick_params(axis="both", labelsize=8)
-    ax.grid(alpha=0.2)
+    style_axes(ax)
 
 
 def _plot_categorical(
@@ -145,13 +145,12 @@ def _plot_categorical(
     medians = valid.groupby("_cat", observed=True)[y_col].median()
     medians = medians.reindex([c for c in cat_order if c in medians.index])
     xs = range(len(medians))
-    ax.bar(xs, medians.values, alpha=0.8)
+    ax.bar(xs, medians.values, alpha=0.85, color=PRIMARY)
     ax.set_xticks(xs)
     ax.set_xticklabels([_shorten_label(s, max_label_len) for s in medians.index], rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("Median Target ($)", fontsize=9)
     ax.set_title(f"{col} vs Target (importance: {importance:.3f})", fontsize=10)
-    ax.tick_params(axis="y", labelsize=8)
-    ax.grid(axis="y", alpha=0.2)
+    style_axes(ax)
 
 
 def create_report_pdf(
@@ -170,6 +169,7 @@ def create_report_pdf(
     - Else: categorical bar chart by frequency, top 15
     Also save individual PNGs to plots_dir.
     """
+    apply_mpl_theme()
     output_path = Path(output_path)
     plots_dir = Path(plots_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +218,7 @@ def create_residuals_report(
     (4) top 20 abs residual rows table
     Also save individual PNGs to plots_dir.
     """
+    apply_mpl_theme()
     output_path = Path(output_path)
     plots_dir = Path(plots_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,15 +229,15 @@ def create_residuals_report(
     with PdfPages(output_path) as pdf:
         # 1. y_true vs y_pred scatter + y=x
         fig, ax = plt.subplots(figsize=(6, 6))
-        ax.scatter(y_true, y_pred, alpha=0.4, s=10)
+        ax.scatter(y_true, y_pred, alpha=0.2, s=10)
         lims = [min(y_true.min(), y_pred.min()), max(y_true.max(), y_pred.max())]
-        ax.plot(lims, lims, "r--", linewidth=2, label="y=x")
+        ax.plot(lims, lims, color=PRIMARY, linestyle="--", linewidth=2, label="y=x")
         ax.set_xlabel("y_true ($)", fontsize=9)
         ax.set_ylabel("y_pred ($)", fontsize=9)
         ax.set_title("y_true vs y_pred")
         ax.legend()
         ax.set_aspect("equal")
-        ax.grid(alpha=0.2)
+        style_axes(ax)
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches="tight")
         fig.savefig(plots_dir / "1_y_true_vs_y_pred.png", bbox_inches="tight", dpi=100)
@@ -244,12 +245,12 @@ def create_residuals_report(
 
         # 2. residual histogram
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.hist(residual, bins=50, alpha=0.7, edgecolor="black")
-        ax.axvline(0, color="red", linestyle="--", linewidth=1)
+        ax.hist(residual, bins=50, alpha=0.7, color=PRIMARY, edgecolor="none")
+        ax.axvline(0, color=PRIMARY, linestyle="--", linewidth=1)
         ax.set_xlabel("Residual ($)", fontsize=9)
         ax.set_ylabel("Count", fontsize=9)
         ax.set_title("Residual Histogram")
-        ax.grid(alpha=0.2)
+        style_axes(ax)
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches="tight")
         fig.savefig(plots_dir / "2_residual_histogram.png", bbox_inches="tight", dpi=100)
@@ -257,12 +258,12 @@ def create_residuals_report(
 
         # 3. residual vs y_true
         fig, ax = plt.subplots(figsize=(6, 4))
-        ax.scatter(y_true, residual, alpha=0.4, s=10)
-        ax.axhline(0, color="red", linestyle="--", linewidth=1)
+        ax.scatter(y_true, residual, alpha=0.2, s=10)
+        ax.axhline(0, color=PRIMARY, linestyle="--", linewidth=1)
         ax.set_xlabel("y_true ($)", fontsize=9)
         ax.set_ylabel("Residual ($)", fontsize=9)
         ax.set_title("Residual vs y_true")
-        ax.grid(alpha=0.2)
+        style_axes(ax)
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches="tight")
         fig.savefig(plots_dir / "3_residual_vs_y_true.png", bbox_inches="tight", dpi=100)
@@ -289,6 +290,7 @@ def create_residuals_report(
                 top20[c] = top20[c].round(2)
         top20.index = range(1, len(top20) + 1)
 
+        from theme import TABLE_ALT_ROW, TABLE_HEADER, CARD_BORDER
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.axis("off")
         table = ax.table(
@@ -301,6 +303,12 @@ def create_residuals_report(
         table.auto_set_font_size(False)
         table.set_fontsize(9)
         table.scale(1.2, 2)
+        for i in range(len(top20.columns)):
+            table[(0, i)].set_facecolor(TABLE_HEADER)
+        for r in range(1, len(top20) + 1):
+            for c in range(len(top20.columns)):
+                if r % 2 == 0:
+                    table[(r, c)].set_facecolor(TABLE_ALT_ROW)
         ax.set_title("Top 20 Absolute Residual Rows", fontsize=11)
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches="tight")
