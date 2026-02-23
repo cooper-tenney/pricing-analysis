@@ -3,249 +3,460 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Run Results</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Run Results — Pricing Audit</title>
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Run Summary</h1>
-        <a href="/" class="back">← Upload New Dataset</a>
-        <a href="/models/config" class="back" style="margin-left: 1rem;">Model Settings</a>
+    <header class="app-header">
+        <div class="app-header-inner">
+            <span class="app-brand">Pricing Audit</span>
+            <nav class="app-nav">
+                {% if summary and summary.timestamp %}
+                <span class="app-timestamp">{{ summary.timestamp[:19] if summary.timestamp else '' }}</span>
+                {% endif %}
+                <a href="/models/config" class="btn btn-ghost">Model settings</a>
+                <a href="/" class="btn btn-primary">Upload new dataset</a>
+            </nav>
+        </div>
+    </header>
 
-        {% if summary and summary.error %}
-        <div class="error">{{ summary.error }}</div>
-        {% endif %}
-        {% if run_id or (summary and (summary.model_name or summary.selected_target)) %}
-
-        <section class="card">
-            <h2>Target &amp; Config</h2>
-            <ul>
-                <li><strong>Model:</strong> {{ summary.model_name or 'xgboost' }}{% if summary.model_params %} (optimized){% endif %}</li>
-                <li><strong>Selected target:</strong> {{ summary.selected_target or '—' }}{% if summary.target_source %} ({{ summary.target_source }}){% endif %}</li>
-                <li><strong>Log1p:</strong> {{ "Yes" if summary.log1p_used else "No" }} — {{ summary.log1p_reason or '—' }}</li>
-                {% if summary.dataset_shape and summary.dataset_shape | length >= 2 %}
-                <li><strong>Dataset shape:</strong> {{ summary.dataset_shape[0] }} rows × {{ summary.dataset_shape[1] }} columns</li>
-                {% endif %}
-                {% if summary.dropped_leakage %}
-                <li><strong>Dropped leakage:</strong> {{ summary.dropped_leakage | join(", ") }}</li>
-                {% endif %}
-                {% if summary.dropped_id_like %}
-                <li><strong>Dropped ID-like:</strong> {{ summary.dropped_id_like | join(", ") }}</li>
-                {% endif %}
-                {% if summary.timestamp %}
-                <li><strong>Timestamp:</strong> {{ summary.timestamp[:19] }}</li>
-                {% endif %}
-            </ul>
-        </section>
-
-        {% if engineered_numeric_cols is defined or skipped_numeric_cols is defined %}
-        <section class="card">
-            <h2>Numeric Feature Engineering</h2>
-            <ul>
-                {% if engineered_numeric_cols %}
-                <li><strong>Applied to:</strong> {{ engineered_numeric_cols | join(", ") }}</li>
-                {% endif %}
-                {% if skipped_numeric_cols %}
-                <li><strong>Skipped:</strong>
-                    <ul>
-                    {% for col, reason in skipped_numeric_cols.items() %}
-                        <li>{{ col }}: {{ reason }}</li>
-                    {% endfor %}
-                    </ul>
-                </li>
-                {% endif %}
-                {% if not engineered_numeric_cols and not skipped_numeric_cols %}
-                <li class="muted">No numeric engineering applied.</li>
-                {% endif %}
-            </ul>
-        </section>
-        {% endif %}
-
-        {% if summary.metrics and not (summary.dry_run | default(false)) %}
-        <section class="card">
-            <h2>Metrics</h2>
-            <table>
-                <thead>
-                    <tr><th>Split</th><th>RMSE</th><th>MAE</th><th>R²</th></tr>
-                </thead>
-                <tbody>
-                    {% for split, m in summary.metrics.items() %}
-                    <tr>
-                        <td>{{ split }}</td>
-                        <td>{{ "%.4f" | format(m.get("RMSE_$", m.get("RMSE", 0))) }}</td>
-                        <td>{{ "%.4f" | format(m.get("MAE_$", m.get("MAE", 0))) }}</td>
-                        <td>{{ "%.4f" | format(m.get("R2_$", m.get("R2", 0))) }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </section>
-
-        {% if summary.top_perm_importance %}
-        <section class="card">
-            <h2>Top 10 Permutation Importance</h2>
-            <table>
-                <thead>
-                    <tr><th>Column</th><th>Importance</th></tr>
-                </thead>
-                <tbody>
-                    {% for row in summary.top_perm_importance %}
-                    <tr><td>{{ row.column }}</td><td>{{ "%.4f" | format(row.importance) }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </section>
-        {% endif %}
-        {% endif %}
-
-        {% if summary.ui_summary_preview %}
-        <section class="card">
-            <h2>UI Summary Preview (top 20 rows)</h2>
-            {% if 'description' in summary.ui_summary_columns %}
-            <button type="button" class="btn btn-small" id="toggle-desc">Show description</button>
+    <main class="main-content">
+        <div class="container">
+            {% if page_error %}
+            <div class="alert-error">{{ page_error }}</div>
             {% endif %}
-            <div class="table-wrap table-scroll">
-                <table class="ui-summary-table" id="ui-summary-table">
-                    <thead>
-                        <tr>
-                            {% for col in summary.ui_summary_columns %}
-                            <th {% if col == 'description' %}class="col-description" style="display:none"{% elif col == 'severity' %}class="sortable active" data-sort="severity"{% elif col == 'missing_pct' %}class="sortable" data-sort="missing_pct"{% endif %}>
-                                {{ col }}
-                                {% if col == 'severity' or col == 'missing_pct' %}
-                                <span class="sort-icon" aria-hidden="true">↕</span>
-                                {% endif %}
-                            </th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in summary.ui_summary_preview %}
-                        <tr class="sev-{{ (row.get('severity') or 0) | int }}" data-severity="{{ (row.get('severity') or 0) | int }}" data-missing-pct="{{ (row.get('missing_pct') or 0) | float }}">
-                            {% for col in summary.ui_summary_columns %}
-                            <td class="{% if col == 'description' %}col-description{% endif %}" {% if col == 'description' %}style="display:none"{% endif %}>
-                                {% if col == 'severity' %}
-                                <span class="badge badge-sev-{{ (row.get(col) or 0) | int }}">{{ row.get(col, 0) }}</span>
-                                {% elif col == 'reasons' or col == 'flags' %}
-                                <span class="truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ row.get(col, '') or '' }}</span>
-                                {% elif col == 'description' %}
-                                <span class="truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ row.get(col, '') or '' }}</span>
+
+            {% if summary and summary.error %}
+            <div class="alert-error">{{ summary.error }}</div>
+            {% endif %}
+
+            {% if run_id or (summary and (summary.model_name or summary.selected_target)) %}
+
+            {% set ds = summary.dataset_shape or [0, 0] %}
+            {% set rows = ds[0] if ds | length >= 1 else 0 %}
+            {% set cols = ds[1] if ds | length >= 2 else 0 %}
+            {% set dropped_leak = summary.dropped_leakage or [] %}
+            {% set dropped_id = summary.dropped_id_like or [] %}
+            {% set dropped_count = dropped_leak | length + dropped_id | length %}
+
+            <!-- Run config card (two columns) -->
+            <section class="card config-grid-section">
+                <h2 class="section-title">Run config</h2>
+                <div class="config-grid">
+                    <div class="config-col">
+                        <dl class="def-list">
+                            <dt>Target</dt>
+                            <dd>{{ summary.selected_target or '—' }} <span class="muted">{{ summary.target_source or '' }}</span></dd>
+                            <dt>Transform</dt>
+                            <dd>{{ "Log1p" if summary.log1p_used else "None" }} — {{ summary.log1p_reason or '—' }}</dd>
+                            <dt>Dataset shape</dt>
+                            <dd>{{ rows | int }} rows × {{ cols | int }} columns</dd>
+                            <dt>Model</dt>
+                            <dd>{{ summary.model_name or 'xgboost' }}{% if summary.model_params %} <span class="muted">(optimized)</span>{% endif %}</dd>
+                        </dl>
+                    </div>
+                    <div class="config-col">
+                        <div class="config-dropped">
+                            <span class="def-list-dt">Dropped leakage</span>
+                            <div class="chip-wrap chip-leakage">
+                                {% if dropped_leak | length > 5 %}
+                                {% for col in dropped_leak[:2] %}
+                                <span class="chip chip-leakage">{{ col }}</span>
+                                {% endfor %}
+                                <span class="chip chip-leakage">+{{ dropped_leak | length - 2 }} more</span>
+                                <button type="button" class="btn btn-small" data-toggle="dropped-leakage">Show all</button>
                                 {% else %}
-                                {{ row.get(col, "") }}
+                                {% for col in dropped_leak %}
+                                <span class="chip chip-leakage">{{ col }}</span>
+                                {% endfor %}
+                                {% if not dropped_leak %}<span class="muted">None</span>{% endif %}
                                 {% endif %}
-                            </td>
+                            </div>
+                            <div class="dropped-content is-collapsed" id="dropped-leakage">
+                                <div class="chip-wrap chip-leakage" style="margin-top:0.5rem;">
+                                    {% for col in dropped_leak %}
+                                    <span class="chip chip-leakage">{{ col }}</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="config-dropped">
+                            <span class="def-list-dt">Dropped ID-like</span>
+                            <div class="chip-wrap chip-idlike">
+                                {% if dropped_id | length > 5 %}
+                                {% for col in dropped_id[:2] %}
+                                <span class="chip chip-idlike">{{ col }}</span>
+                                {% endfor %}
+                                <span class="chip chip-idlike">+{{ dropped_id | length - 2 }} more</span>
+                                <button type="button" class="btn btn-small" data-toggle="dropped-idlike">Show all</button>
+                                {% else %}
+                                {% for col in dropped_id %}
+                                <span class="chip chip-idlike">{{ col }}</span>
+                                {% endfor %}
+                                {% if not dropped_id %}<span class="muted">None</span>{% endif %}
+                                {% endif %}
+                            </div>
+                            <div class="dropped-content is-collapsed" id="dropped-idlike">
+                                <div class="chip-wrap chip-idlike" style="margin-top:0.5rem;">
+                                    {% for col in dropped_id %}
+                                    <span class="chip chip-idlike">{{ col }}</span>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Numeric Feature Engineering -->
+            {% if engineered_numeric_cols is defined or skipped_numeric_cols is defined %}
+            {% if engineered_numeric_cols or skipped_numeric_cols %}
+            <section class="card">
+                <h2 class="section-title">Numeric feature engineering</h2>
+                <div class="table-wrap">
+                    <table class="eng-table dashboard-table">
+                        <thead>
+                            <tr><th>Column</th><th>Status</th><th>Reason</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for col in engineered_numeric_cols or [] %}
+                            <tr>
+                                <td>{{ col }}</td>
+                                <td><span class="pill pill-applied">Applied</span></td>
+                                <td class="muted">—</td>
+                            </tr>
                             {% endfor %}
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </section>
-        <script>
-        (function() {
-            var toggleBtn = document.getElementById('toggle-desc');
-            var descCols = document.querySelectorAll('.col-description');
-            var descVisible = false;
-            if (toggleBtn && descCols.length) {
-                toggleBtn.addEventListener('click', function() {
-                    descVisible = !descVisible;
-                    descCols.forEach(function(el) { el.style.display = descVisible ? '' : 'none'; });
-                    toggleBtn.textContent = descVisible ? 'Hide description' : 'Show description';
-                });
+                            {% for col, reason in (skipped_numeric_cols or {}) | dictsort %}
+                            <tr>
+                                <td>{{ col }}</td>
+                                <td><span class="pill pill-skipped">Skipped</span></td>
+                                <td>{{ reason }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="muted">No numeric engineering applied.</p>
+                {% endif %}
+            </section>
+            {% endif %}
+
+            {% if summary.metrics and not (summary.dry_run | default(false)) %}
+            <section class="card">
+                <h2 class="section-title">Metrics</h2>
+                <div class="table-wrap">
+                    <table class="dashboard-table">
+                        <thead>
+                            <tr><th>Split</th><th>RMSE</th><th>MAE</th><th>R²</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for split, m in summary.metrics.items() %}
+                            <tr>
+                                <td>{{ split }}</td>
+                                <td>{{ "%.4f" | format(m.get("RMSE_$", m.get("RMSE", 0))) }}</td>
+                                <td>{{ "%.4f" | format(m.get("MAE_$", m.get("MAE", 0))) }}</td>
+                                <td>{{ "%.4f" | format(m.get("R2_$", m.get("R2", 0))) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if summary.top_perm_importance %}
+            <section class="card">
+                <h2 class="section-title">Top 10 permutation importance</h2>
+                <div class="table-wrap">
+                    <table class="dashboard-table">
+                        <thead>
+                            <tr><th>Column</th><th>Importance</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for row in summary.top_perm_importance %}
+                            <tr><td>{{ row.column }}</td><td>{{ "%.4f" | format(row.importance) }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            {% endif %}
+            {% endif %}
+
+            <!-- Audit section (Column audit) -->
+            {% if summary.ui_summary_preview %}
+            <section class="card">
+                <h2 class="section-title">Column audit</h2>
+                <div class="audit-kpis">
+                    <div class="audit-kpi sev-3">
+                        <span class="value">{{ audit_severity_counts.sev_3 | default(0) }}</span>
+                        <span class="label">Severity 3</span>
+                    </div>
+                    <div class="audit-kpi sev-2">
+                        <span class="value">{{ audit_severity_counts.sev_2 | default(0) }}</span>
+                        <span class="label">Severity 2</span>
+                    </div>
+                    <div class="audit-kpi sev-1">
+                        <span class="value">{{ audit_severity_counts.sev_1 | default(0) }}</span>
+                        <span class="label">Severity 1</span>
+                    </div>
+                    <div class="audit-kpi sev-0">
+                        <span class="value">{{ audit_severity_counts.sev_0 | default(0) }}</span>
+                        <span class="label">Severity 0</span>
+                    </div>
+                </div>
+                <p class="muted" style="margin-bottom:1rem;">Worst columns (top 20). Click row to expand details.</p>
+                {% if 'description' in summary.ui_summary_columns %}
+                <button type="button" class="btn btn-small" id="toggle-desc">Show description</button>
+                {% endif %}
+                <input type="text" class="table-search" id="audit-search" placeholder="Filter by column, flag...">
+                <div class="table-wrap table-scroll">
+                    <table class="dashboard-table" id="ui-summary-table">
+                        <thead>
+                            <tr>
+                                <th class="chevron-cell"></th>
+                                {% for col in summary.ui_summary_columns %}
+                                {% if col != 'detail_reason' and col != 'detail_stats' and col != 'reason_pretty' %}
+                                <th {% if col == 'description' %}class="col-description" style="display:none"{% elif col == 'severity' %}class="sortable active" data-sort="severity"{% elif col == 'missing_pct' %}class="sortable" data-sort="missing_pct"{% elif col == 'nunique' %}class="sortable" data-sort="nunique"{% endif %}>
+                                    {{ col }}
+                                    {% if col == 'severity' or col == 'missing_pct' or col == 'nunique' %}
+                                    <span class="sort-icon" aria-hidden="true">↕</span>
+                                    {% endif %}
+                                </th>
+                                {% endif %}
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in summary.ui_summary_preview %}
+                            {% set sev = (row.get('severity') or 0) | int %}
+                            {% set row_flags = (row.get('flags_pretty') or '') | split_flags %}
+                            {% set key_issue = (row.get('key_issue') or row.get('reason_pretty') or '') | safe_str %}
+                            {% set detail_reason = (row.get('detail_reason') or row.get('reason_pretty') or key_issue) | safe_str %}
+                            {% set detail_stats = (row.get('detail_stats') or row.get('stats_pretty') or '') | safe_str %}
+                            <tr class="audit-row sev-{{ sev }}" data-severity="{{ sev }}" data-missing-pct="{{ (row.get('missing_pct') or 0) | float }}" data-nunique="{{ (row.get('nunique') or 0) | int }}"
+                                data-column="{{ (row.get('column') or '') | lower }}" data-flags="{{ (row.get('flags_pretty') or '') | lower }}">
+                                <td class="chevron-cell audit-row-expand" data-detail-id="detail-row-{{ loop.index }}">
+                                    <span class="chevron" aria-hidden="true">▶</span>
+                                </td>
+                                {% for col in summary.ui_summary_columns %}
+                                {% if col != 'detail_reason' and col != 'detail_stats' and col != 'reason_pretty' %}
+                                <td class="{% if col == 'description' %}col-description{% endif %}{% if col in ['flags_pretty','key_issue','stats_pretty'] %} cell-compact{% endif %}" {% if col == 'description' %}style="display:none"{% endif %}>
+                                    {% if col == 'severity' %}
+                                    <span class="badge badge-sev-{{ sev }}">{{ sev }}</span>
+                                    {% elif col == 'flags_pretty' %}
+                                    <span class="cell-badges" title="{{ (row.get(col) or '') | replace('"', '&quot;') }}">
+                                        {% for part in row_flags[:3] %}
+                                        <span class="chip {{ part | flag_chip_class }}">{{ part[:20] }}{% if part | length > 20 %}…{% endif %}</span>
+                                        {% endfor %}
+                                        {% if row_flags | length > 3 %}
+                                        <span class="chip chip-flag-default">+{{ row_flags | length - 3 }}</span>
+                                        {% endif %}
+                                    </span>
+                                    {% elif col == 'key_issue' %}
+                                    <span class="cell-truncate" title="{{ key_issue | replace('"', '&quot;') }}">{% if key_issue | length > 60 %}{{ key_issue[:60] }}…{% else %}{{ key_issue or '—' }}{% endif %}</span>
+                                    {% elif col == 'description' %}
+                                    <span class="cell-truncate" title="{{ (row.get(col, '') or '') | replace('"', '&quot;') }}">{{ (row.get(col, '') or '')[:80] }}{% if (row.get(col, '') or '') | length > 80 %}…{% endif %}</span>
+                                    {% else %}
+                                    {{ row.get(col, "") }}
+                                    {% endif %}
+                                </td>
+                                {% endif %}
+                                {% endfor %}
+                            </tr>
+                            <tr class="audit-detail-row" id="detail-row-{{ loop.index }}" style="display:none;">
+                                <td colspan="15">
+                                    <div class="detail-content">
+                                        <div class="detail-label">Full flags</div>
+                                        <div class="chip-wrap">{% for part in row_flags %}<span class="chip {{ part | flag_chip_class }}">{{ part }}</span>{% endfor %}{% if not row_flags %}<span class="muted">None</span>{% endif %}</div>
+                                    </div>
+                                    <div class="detail-content">
+                                        <div class="detail-label">Key issue / reasons</div>
+                                        <div>{{ detail_reason or '—' }}</div>
+                                    </div>
+                                    {% if detail_stats %}
+                                    <div class="detail-content">
+                                        <div class="detail-label">Stats</div>
+                                        <div>{{ detail_stats }}</div>
+                                    </div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if optuna_best or opt_status %}
+            <section class="card">
+                <h2 class="section-title">Optimization summary</h2>
+                <dl class="def-list def-list-inline">
+                    {% if optuna_best %}
+                    <dt>Best CV RMSE</dt>
+                    <dd>{{ "%.4f" | format(optuna_best.best_score) }}</dd>
+                    <dt>Model</dt>
+                    <dd>{{ config.model_name or "xgboost" }}</dd>
+                    {% endif %}
+                    {% if opt_status and opt_status.finished_at %}
+                    <dt>Completed</dt>
+                    <dd>{{ opt_status.finished_at[:19] }}</dd>
+                    {% endif %}
+                </dl>
+                {% if optuna_best and optuna_best.best_params %}
+                <details class="optuna-params">
+                    <summary>Best params</summary>
+                    <pre>{% for k, v in optuna_best.best_params.items() %}{{ k }}: {{ v }}
+{% endfor %}</pre>
+                </details>
+                {% endif %}
+            </section>
+            {% endif %}
+
+            {% if run_id %}
+            <section class="card">
+                <h2 class="section-title">Reports &amp; artifacts</h2>
+                <div class="artifacts">
+                    {% if not (summary.dry_run | default(false)) and has_report %}
+                    <a href="/view/{{ run_id }}/report.pdf" class="btn btn-primary" target="_blank">View feature report</a>
+                    {% endif %}
+                    <a href="/view/{{ run_id }}/audit_report.pdf" class="btn btn-ghost" target="_blank">View audit report</a>
+                    <a href="/download_zip/{{ run_id }}" class="btn btn-ghost">Download ZIP</a>
+                </div>
+                <ul class="links">
+                    <li><a href="/download/{{ run_id }}/ui_summary.csv">ui_summary.csv</a></li>
+                    <li><a href="/download/{{ run_id }}/ui_summary.md">ui_summary.md</a></li>
+                    {% if not (summary.dry_run | default(false)) and has_perm %}
+                    <li><a href="/download/{{ run_id }}/permutation_importance.csv">permutation_importance.csv</a></li>
+                    {% endif %}
+                    <li><a href="/download/{{ run_id }}/run_config.json">run_config.json</a></li>
+                </ul>
+            </section>
+            {% else %}
+            <section class="card">
+                <h2 class="section-title">Reports &amp; artifacts</h2>
+                <p class="muted">No pipeline run yet. Upload a file and run the pipeline to generate reports.</p>
+                <a href="/" class="btn btn-primary">Upload new dataset</a>
+                <a href="/models/config" class="btn btn-ghost">Model settings</a>
+            </section>
+            {% endif %}
+
+        </div>
+    </main>
+
+    <script>
+    (function() {
+        // Expand/collapse dropped sections
+        document.querySelectorAll('[data-toggle]').forEach(function(btn) {
+            var targetId = btn.getAttribute('data-toggle');
+            var content = document.getElementById(targetId);
+            if (!content) return;
+            btn.addEventListener('click', function() {
+                content.classList.toggle('is-collapsed');
+                btn.textContent = content.classList.contains('is-collapsed') ? 'Show all' : 'Hide';
+            });
+        });
+
+        // Audit table: row expand
+        document.querySelectorAll('.audit-row-expand').forEach(function(cell) {
+            var detailId = cell.getAttribute('data-detail-id');
+            if (!detailId) return;
+            var detailRow = document.getElementById(detailId);
+            if (!detailRow) return;
+            cell.addEventListener('click', function() {
+                var show = detailRow.style.display === 'none' || detailRow.style.display === '';
+                detailRow.style.display = show ? 'table-row' : 'none';
+                var chevron = cell.querySelector('.chevron');
+                if (chevron) chevron.textContent = show ? '▼' : '▶';
+                cell.closest('tr').classList.toggle('expanded', show);
+            });
+        });
+
+        // Sort
+        var table = document.getElementById('ui-summary-table');
+        if (!table) return;
+        var tbody = table.querySelector('tbody');
+        var headers = table.querySelectorAll('th.sortable');
+        var sortCol = 'severity';
+        var sortAsc = false;
+        function sort() {
+            var pairs = [];
+            var trs = tbody.querySelectorAll('tr');
+            for (var i = 0; i < trs.length; i++) {
+                var tr = trs[i];
+                if (tr.classList.contains('audit-detail-row')) continue;
+                var detail = tr.nextElementSibling && tr.nextElementSibling.classList.contains('audit-detail-row') ? tr.nextElementSibling : null;
+                pairs.push({ row: tr, detail: detail });
             }
-            var table = document.getElementById('ui-summary-table');
-            if (!table) return;
-            var tbody = table.querySelector('tbody');
-            var headers = table.querySelectorAll('th.sortable');
-            var sortCol = 'severity';
-            var sortAsc = false;
-            function sort() {
-                var rows = Array.from(tbody.querySelectorAll('tr'));
-                rows.sort(function(a, b) {
-                    var av, bv;
-                    if (sortCol === 'severity') {
-                        av = parseInt(a.dataset.severity || 0, 10);
-                        bv = parseInt(b.dataset.severity || 0, 10);
-                    } else {
-                        av = parseFloat(a.dataset.missingPct || 0);
-                        bv = parseFloat(b.dataset.missingPct || 0);
+            pairs.sort(function(a, b) {
+                var ar = a.row, br = b.row;
+                var av, bv;
+                if (sortCol === 'severity') {
+                    av = parseInt(ar.dataset.severity || 0, 10);
+                    bv = parseInt(br.dataset.severity || 0, 10);
+                } else if (sortCol === 'missing_pct') {
+                    av = parseFloat(ar.dataset.missingPct || 0);
+                    bv = parseFloat(br.dataset.missingPct || 0);
+                } else {
+                    av = parseInt(ar.dataset.nunique || 0, 10);
+                    bv = parseInt(br.dataset.nunique || 0, 10);
+                }
+                if (av !== bv) return sortAsc ? av - bv : bv - av;
+                return 0;
+            });
+            pairs.forEach(function(p) {
+                tbody.appendChild(p.row);
+                if (p.detail) tbody.appendChild(p.detail);
+            });
+        }
+        headers.forEach(function(th) {
+            th.addEventListener('click', function() {
+                var col = th.dataset.sort;
+                if (!col) return;
+                sortAsc = sortCol === col ? !sortAsc : (col === 'severity' ? false : true);
+                sortCol = col;
+                headers.forEach(function(h) { h.classList.remove('active'); });
+                th.classList.add('active');
+                sort();
+            });
+        });
+
+        // Search filter
+        var searchEl = document.getElementById('audit-search');
+        if (searchEl) {
+            searchEl.addEventListener('input', function() {
+                var q = (searchEl.value || '').toLowerCase().trim();
+                tbody.querySelectorAll('tr.audit-row').forEach(function(tr) {
+                    if (!q) {
+                        tr.style.display = '';
+                        var dr = tr.nextElementSibling;
+                        if (dr && dr.classList.contains('audit-detail-row')) dr.style.display = tr.classList.contains('expanded') ? 'table-row' : 'none';
+                        return;
                     }
-                    if (av !== bv) return sortAsc ? av - bv : bv - av;
-                    return 0;
-                });
-                rows.forEach(function(r) { tbody.appendChild(r); });
-            }
-            headers.forEach(function(th) {
-                th.addEventListener('click', function() {
-                    var col = th.dataset.sort;
-                    if (!col) return;
-                    sortAsc = sortCol === col ? !sortAsc : (col === 'severity' ? false : true);
-                    sortCol = col;
-                    headers.forEach(function(h) { h.classList.remove('active'); });
-                    th.classList.add('active');
-                    sort();
+                    var col = (tr.dataset.column || '');
+                    var flags = (tr.dataset.flags || '');
+                    var match = col.indexOf(q) >= 0 || flags.indexOf(q) >= 0;
+                    tr.style.display = match ? '' : 'none';
+                    var dr = tr.nextElementSibling;
+                    if (dr && dr.classList.contains('audit-detail-row')) dr.style.display = 'none';
                 });
             });
-        })();
-        </script>
-        {% endif %}
+        }
 
-        {% if optuna_best or opt_status %}
-        <section class="card">
-            <h2>Optimization Summary</h2>
-            <ul>
-                {% if optuna_best %}
-                <li><strong>Best CV RMSE:</strong> {{ "%.4f" | format(optuna_best.best_score) }}</li>
-                <li><strong>Model:</strong> {{ config.model_name or "xgboost" }}</li>
-                {% endif %}
-                {% if opt_status and opt_status.finished_at %}
-                <li><strong>Completed:</strong> {{ opt_status.finished_at[:19] }}</li>
-                {% endif %}
-            </ul>
-            {% if optuna_best and optuna_best.best_params %}
-            <p><strong>Best params:</strong></p>
-            <pre>{% for k, v in optuna_best.best_params.items() %}{{ k }}: {{ v }}
-{% endfor %}</pre>
-            {% endif %}
-        </section>
-        {% endif %}
-
-        {% if run_id %}
-        <section class="card">
-            <h2>Reports &amp; Artifacts</h2>
-            <div class="artifacts">
-                {% if not (summary.dry_run | default(false)) and has_report %}
-                <a href="/view/{{ run_id }}/report.pdf" class="btn primary" target="_blank">View Feature Report</a>
-                {% endif %}
-                <a href="/view/{{ run_id }}/audit_report.pdf" class="btn" target="_blank">View Audit Report</a>
-                <a href="/download_zip/{{ run_id }}" class="btn">Download All Artifacts (ZIP)</a>
-                <a href="/models/config" class="btn">Back to Model Config</a>
-                <a href="/" class="btn">Upload New Dataset</a>
-            </div>
-            <ul class="links">
-                <li><a href="/download/{{ run_id }}/ui_summary.csv">ui_summary.csv</a></li>
-                <li><a href="/download/{{ run_id }}/ui_summary.md">ui_summary.md</a></li>
-                {% if not (summary.dry_run | default(false)) and has_perm %}
-                <li><a href="/download/{{ run_id }}/permutation_importance.csv">permutation_importance.csv</a></li>
-                {% endif %}
-                <li><a href="/download/{{ run_id }}/run_config.json">run_config.json</a></li>
-            </ul>
-        </section>
-        {% else %}
-        <section class="card">
-            <h2>Reports &amp; Artifacts</h2>
-            <p class="muted">No pipeline run yet. Upload a file and run the pipeline to generate reports.</p>
-            <a href="/" class="btn">Upload New Dataset</a>
-            <a href="/models/config" class="btn">Model Settings</a>
-        </section>
-        {% endif %}
-        {% else %}
-        <section class="card">
-            <h2>No Run Yet</h2>
-            <p class="muted">Upload a file and run the pipeline to see results.</p>
-            <a href="/" class="btn primary">Upload New Dataset</a>
-            <a href="/models/config" class="btn">Model Settings</a>
-        </section>
-        {% endif %}
-    </div>
+        // Toggle description column
+        var toggleBtn = document.getElementById('toggle-desc');
+        var descCols = document.querySelectorAll('.col-description');
+        var descVisible = false;
+        if (toggleBtn && descCols.length) {
+            toggleBtn.addEventListener('click', function() {
+                descVisible = !descVisible;
+                descCols.forEach(function(el) { el.style.display = descVisible ? '' : 'none'; });
+                toggleBtn.textContent = descVisible ? 'Hide description' : 'Show description';
+            });
+        }
+    })();
+    </script>
 </body>
 </html>

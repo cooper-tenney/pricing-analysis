@@ -12,14 +12,16 @@ Testing steps:
 
 import io
 import json
+import logging
 import threading
+import traceback
 import zipfile
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -28,7 +30,8 @@ from run_utils import generate_run_id, read_latest_run_id, write_latest_run_id
 from pdf_extract import extract_table_from_pdf
 from runner import run_pipeline
 
-app = FastAPI(title="Pricing Analysis")
+logger = logging.getLogger("uvicorn.error")
+app = FastAPI(title="Pricing Analysis", debug=True)
 BASE = Path(__file__).resolve().parent
 UPLOADS = BASE / "uploads"
 ARTIFACTS = BASE / "artifacts"
@@ -39,6 +42,43 @@ RUNS.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+
+
+def _split_flags(val):
+    """Split flags string by bullet or pipe into list of non-empty strings."""
+    s = str(val or "").strip()
+    if not s:
+        return []
+    return [p.strip() for p in s.replace(" | ", " \u2022 ").replace("|", "\u2022").split("\u2022") if p.strip()]
+
+
+def _flag_chip_class(flag: str) -> str:
+    """Return CSS class for flag chip based on flag type."""
+    f = (flag or "").lower().replace(" ", "_")
+    if "leakage" in f:
+        return "chip-flag-leakage"
+    if "missing" in f:
+        return "chip-flag-missing"
+    if "cardinality" in f or "constant" in f:
+        return "chip-flag-cardinality"
+    if "id" in f or "id_like" in f:
+        return "chip-flag-idlike"
+    return "chip-flag-default"
+
+
+def _safe_str(val):
+    """Convert value to string, handling None and NaN."""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if s.lower() == "nan":
+        return ""
+    return s
+
+
+templates.env.filters["split_flags"] = _split_flags
+templates.env.filters["flag_chip_class"] = _flag_chip_class
+templates.env.filters["safe_str"] = _safe_str
 
 ALLOWED_FILES = frozenset({".csv", ".pdf"})
 SAFE_ARTIFACTS = frozenset({
@@ -59,6 +99,19 @@ def _safe_filename(name: str) -> bool:
     return name in SAFE_ARTIFACTS and ".." not in name
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Backstop: log and return traceback for any unhandled exception."""
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    tb = traceback.format_exc()
+    logger.error("Unhandled exception: %s\n%s", repr(exc), tb)
+    return JSONResponse(
+        status_code=500,
+        content={"error": repr(exc), "traceback": tb},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     last_run_id = read_latest_run_id(ARTIFACTS)
@@ -76,47 +129,51 @@ async def run(
     dry_run: str = Form(""),
     summarize_columns: str = Form(""),
 ):
-    target = target.strip() or None
-    dry_run_bool = dry_run.lower() in ("1", "true", "on", "yes")
-    use_openai = summarize_columns.lower() in ("1", "true", "on", "yes")
-
-    if not file or not file.filename:
-        raise HTTPException(status_code=400, detail="No file uploaded")
-    suf = Path(file.filename).suffix.lower()
-    if suf not in ALLOWED_FILES:
-        raise HTTPException(status_code=400, detail="Upload CSV or PDF only")
-
-    run_id = generate_run_id()
-    upload_dir = UPLOADS / run_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    upload_path = upload_dir / file.filename
-    content = await file.read()
-    upload_path.write_bytes(content)
-
-    # Store last upload for /models/optimize
-    last_upload = {
-        "path": str(upload_path.resolve()),
-        "run_id": run_id,
-        "filename": file.filename,
-    }
-    (ARTIFACTS / "last_upload.json").write_text(json.dumps(last_upload), encoding="utf-8")
+    # Confirm handler is hit (safe: filename and form keys only)
+    params_info = {"filename": getattr(file, "filename", None), "target": bool(target), "dry_run": bool(dry_run), "summarize_columns": bool(summarize_columns)}
+    logger.info("POST /run hit. params=%s", params_info)
 
     try:
-        if suf == ".csv":
-            df_raw = pd.read_csv(upload_path)
-        else:
-            df_raw = extract_table_from_pdf(upload_path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+        target = target.strip() or None
+        dry_run_bool = dry_run.lower() in ("1", "true", "on", "yes")
+        use_openai = summarize_columns.lower() in ("1", "true", "on", "yes")
 
-    run_dir = RUNS / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="No file uploaded")
+        suf = Path(file.filename).suffix.lower()
+        if suf not in ALLOWED_FILES:
+            raise HTTPException(status_code=400, detail="Upload CSV or PDF only")
 
-    model_config = read_config(ARTIFACTS / "model_config.json")
-    try:
+        run_id = generate_run_id()
+        upload_dir = UPLOADS / run_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        upload_path = upload_dir / file.filename
+        content = await file.read()
+        upload_path.write_bytes(content)
+
+        # Store last upload for /models/optimize
+        last_upload = {
+            "path": str(upload_path.resolve()),
+            "run_id": run_id,
+            "filename": file.filename,
+        }
+        (ARTIFACTS / "last_upload.json").write_text(json.dumps(last_upload), encoding="utf-8")
+
+        try:
+            if suf == ".csv":
+                df_raw = pd.read_csv(upload_path)
+            else:
+                df_raw = extract_table_from_pdf(upload_path)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+
+        run_dir = RUNS / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+
+        model_config = read_config(ARTIFACTS / "model_config.json")
         summary = run_pipeline(
             df_raw=df_raw,
             input_name=file.filename,
@@ -131,34 +188,49 @@ async def run(
             no_log1p=False,
             model_config=model_config,
         )
+
+        # Persist run summary as single source of truth for summary pages
+        run_summary_data = {
+            "run_id": run_id,
+            "model_name": summary.get("model_name"),
+            "model_params": summary.get("model_params"),
+            "train_metrics": summary.get("metrics", {}).get("train"),
+            "test_metrics": summary.get("metrics", {}).get("test"),
+            "timestamp": datetime.now().isoformat(),
+            "selected_target": summary.get("selected_target"),
+            "target_source": summary.get("target_source"),
+            "dataset_shape": list(df_raw.shape),
+            "log1p_used": summary.get("log1p_used", False),
+            "log1p_reason": summary.get("log1p_reason", ""),
+            "dropped_leakage": summary.get("dropped_leakage", []),
+            "dropped_id_like": summary.get("dropped_id_like", []),
+            "dry_run": summary.get("dry_run", False),
+            "error": summary.get("error"),
+        }
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        (ARTIFACTS / "run_summary.json").write_text(
+            json.dumps(run_summary_data, indent=2), encoding="utf-8"
+        )
+
+        write_latest_run_id(ARTIFACTS, run_id)
+        return RedirectResponse(url="/results", status_code=303)
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    # Persist run summary as single source of truth for summary pages
-    run_summary_data = {
-        "run_id": run_id,
-        "model_name": summary.get("model_name"),
-        "model_params": summary.get("model_params"),
-        "train_metrics": summary.get("metrics", {}).get("train"),
-        "test_metrics": summary.get("metrics", {}).get("test"),
-        "timestamp": datetime.now().isoformat(),
-        "selected_target": summary.get("selected_target"),
-        "target_source": summary.get("target_source"),
-        "dataset_shape": list(df_raw.shape),
-        "log1p_used": summary.get("log1p_used", False),
-        "log1p_reason": summary.get("log1p_reason", ""),
-        "dropped_leakage": summary.get("dropped_leakage", []),
-        "dropped_id_like": summary.get("dropped_id_like", []),
-        "dry_run": summary.get("dry_run", False),
-        "error": summary.get("error"),
-    }
-    ARTIFACTS.mkdir(parents=True, exist_ok=True)
-    (ARTIFACTS / "run_summary.json").write_text(
-        json.dumps(run_summary_data, indent=2), encoding="utf-8"
-    )
-
-    write_latest_run_id(ARTIFACTS, run_id)
-    return RedirectResponse(url="/results", status_code=303)
+        tb = traceback.format_exc()
+        logger.error("POST /run failed: %s\n%s", repr(e), tb)
+        err_msg = str(e) if len(str(e)) < 500 else str(e)[:497] + "..."
+        ARTIFACTS.mkdir(parents=True, exist_ok=True)
+        (ARTIFACTS / "run_summary.json").write_text(
+            json.dumps({"error": err_msg, "run_id": None}, indent=2),
+            encoding="utf-8",
+        )
+        from urllib.parse import quote
+        return RedirectResponse(
+            url=f"/results?error={quote(err_msg)}",
+            status_code=303,
+        )
 
 
 def _read_run_summary() -> dict | None:
@@ -187,8 +259,21 @@ def _get_last_run_id() -> str | None:
         return None
 
 
+def _audit_severity_counts(ui_df: pd.DataFrame) -> dict:
+    """Return count of columns per severity 0-3."""
+    if ui_df.empty or "severity" not in ui_df.columns:
+        return {"sev_3": 0, "sev_2": 0, "sev_1": 0, "sev_0": 0}
+    s = ui_df["severity"].fillna(0).astype(int)
+    return {
+        "sev_3": int((s == 3).sum()),
+        "sev_2": int((s == 2).sum()),
+        "sev_1": int((s == 1).sum()),
+        "sev_0": int((s == 0).sum()),
+    }
+
+
 @app.get("/results", response_class=HTMLResponse)
-async def results_page(request: Request):
+async def results_page(request: Request, error: str | None = None):
     """Render run summary from persisted data only. Single source of truth for summary pages."""
     run_summary = _read_run_summary()
     run_id = (run_summary.get("run_id") if run_summary else None) or _get_last_run_id()
@@ -197,14 +282,17 @@ async def results_page(request: Request):
     # Load from persisted run artifacts
     ui_summary_preview = []
     ui_summary_columns = []
+    audit_severity_counts = {"sev_3": 0, "sev_2": 0, "sev_1": 0, "sev_0": 0}
     top_perm_importance = []
     if run_dir:
         ui_csv = run_dir / "ui_summary.csv"
         if ui_csv.exists():
             try:
-                ui_preview = pd.read_csv(ui_csv).head(20)
+                ui_full = pd.read_csv(ui_csv)
+                ui_preview = ui_full.head(20)
                 ui_summary_preview = ui_preview.to_dict(orient="records")
                 ui_summary_columns = list(ui_preview.columns)
+                audit_severity_counts = _audit_severity_counts(ui_full)
             except Exception:
                 pass
         perm_csv = run_dir / "permutation_importance.csv"
@@ -221,6 +309,7 @@ async def results_page(request: Request):
 
     engineered_numeric_cols = []
     skipped_numeric_cols = {}
+    run_config = {}
     if has_config and run_dir:
         try:
             cfg = json.loads((run_dir / "run_config.json").read_text(encoding="utf-8"))
@@ -228,6 +317,7 @@ async def results_page(request: Request):
             skipped_numeric_cols = cfg.get("skipped_numeric_cols", {})
             if isinstance(skipped_numeric_cols, list):
                 skipped_numeric_cols = dict(skipped_numeric_cols) if skipped_numeric_cols else {}
+            run_config = cfg
         except Exception:
             pass
 
@@ -250,6 +340,7 @@ async def results_page(request: Request):
         "request": request,
         "run_id": run_id,
         "summary": summary,
+        "run_config": run_config,
         "has_report": has_report,
         "has_perm": has_perm,
         "has_config": has_config,
@@ -258,6 +349,8 @@ async def results_page(request: Request):
         "optuna_best": optuna_best,
         "opt_status": opt_status,
         "config": config,
+        "audit_severity_counts": audit_severity_counts,
+        "page_error": error,
     })
 
 
