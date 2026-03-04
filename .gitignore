@@ -5,3 +5,9 @@ artifacts/
 .env
 .DS_Store
 uploads/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
